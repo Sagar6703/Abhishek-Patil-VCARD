@@ -275,17 +275,87 @@ function makeVCard(){
   "END:VCARD"
  ].filter(Boolean).join("\r\n");
 }
-$("saveBtn").onclick=()=>$("modal").classList.add("show");
+/* ---------- SAVE CONTACT: open the native contacts app ---------- */
+
+// Path to a REAL .vcf file sitting next to index.html on your server.
+// iOS Safari will only open the contact sheet for a real hosted file,
+// not for a Blob or data: URL.
+const VCF_URL = "contact.vcf";
+
+const ua = navigator.userAgent || "";
+const isIOS = /iPad|iPhone|iPod/.test(ua) ||
+              (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isAndroid = /Android/i.test(ua);
+
+// Android: open the contacts app's "Create contact" screen, pre-filled.
+function androidIntentURL(){
+  const e = s => encodeURIComponent(s || "");
+  const postal = [CONTACT.venue,
+                  [CONTACT.street, CONTACT.streetNumber].filter(Boolean).join(" "),
+                  [CONTACT.city, CONTACT.state, CONTACT.zip].filter(Boolean).join(", "),
+                  CONTACT.country].filter(Boolean).join(", ");
+  let url = "intent:#Intent;action=android.intent.action.INSERT;"
+          + "type=vnd.android.cursor.dir/contact;";
+  url += `S.name=${e(fullName)};`;
+  if(CONTACT.mobile)  url += `S.phone=${e(CONTACT.mobile)};`;
+  if(CONTACT.phone)   url += `S.secondary_phone=${e(CONTACT.phone)};`;
+  if(CONTACT.email)   url += `S.email=${e(CONTACT.email)};`;
+  if(CONTACT.company) url += `S.company=${e(CONTACT.company)};`;
+  if(CONTACT.job)     url += `S.job_title=${e(CONTACT.job)};`;
+  if(postal)          url += `S.postal=${e(postal)};`;
+  if(CONTACT.website) url += `S.notes=${e(CONTACT.website)};`;
+  url += "end";
+  return url;
+}
+
+// Last resort: generate the file client-side and hand it to the browser.
+function downloadVCard(){
+  const blob = new Blob([makeVCard()], {type:"text/vcard;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (fullName || "contact").replace(/\s+/g,"_") + ".vcf";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+
+function saveContact(){
+  if(isIOS){
+    // Safari opens this in the native contact preview with "Add to Contacts".
+    window.location.href = VCF_URL;
+    return;
+  }
+
+  if(isAndroid){
+    // If the intent fires, the page goes to the background and we cancel
+    // the fallback. If nothing handles it (Firefox, in-app webviews),
+    // we quietly download the .vcf instead.
+    let handled = false;
+    const onHide = () => { if(document.hidden) handled = true; };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onHide);
+
+    window.location.href = androidIntentURL();
+
+    setTimeout(() => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onHide);
+      if(!handled && !document.hidden) downloadVCard();
+    }, 1200);
+    return;
+  }
+
+  // Desktop and everything else.
+  downloadVCard();
+}
+
+$("saveBtn").onclick = saveContact;
+
+// Modal kept for the "Send by Email" option only.
 $("close").onclick=()=>$("modal").classList.remove("show");
 $("modal").onclick=e=>{if(e.target.id==="modal") $("modal").classList.remove("show")};
-
-$("phoneSave").onclick=()=>{
- const blob=new Blob([makeVCard()],{type:"text/vcard;charset=utf-8"});
- const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
- a.download=(fullName||"contact").replace(/\s+/g,"_")+".vcf"; a.click();
- setTimeout(()=>URL.revokeObjectURL(a.href),1000);
- $("modal").classList.remove("show");
-};
+if($("phoneSave")) $("phoneSave").onclick = saveContact;
 
 $("emailShare").onclick=()=>{
  const subject=encodeURIComponent(`Contact details - ${fullName}`);
